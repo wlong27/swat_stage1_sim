@@ -17,6 +17,8 @@ isAttacked_MV101 = False
 isAttacked_LIT101 = False
 isAttacked_P101 = False
 isAutoSIM = True
+isAttack = True
+
 
 FLOWRATE_1 = 1.11857
 FLOWRATE_2 = 28.5234
@@ -29,6 +31,7 @@ TAU = 5
 CUSUM = 0
 ATTACKS = 0
 DETECTED = 0
+FALSE_ALARMS = 0
 
 #MV101=OPEN, P101=ON:  Rise at 1.11857mm/minute
 #MV101=OPEN, P101=OFF: Rise at 28.5234mm/minute
@@ -140,6 +143,21 @@ class GuiPart:
         self.lbl_Det.configure(font="Bold 11")
         self.var_Det.set("D: " + str(DETECTED))
 
+        #Detection rate D/A
+        self.var_DetRate = tkinter.StringVar()
+        self.lbl_DetRate = tkinter.Label(master, textvariable=self.var_DetRate)
+        self.lbl_DetRate.place(x=10, y=260)
+        self.lbl_DetRate.configure(font="Bold 11")
+        self.var_DetRate.set("D/A: " + str((DETECTED/ATTACKS) if ATTACKS > 0 else 0))
+
+        #False alarm
+        self.var_FA = tkinter.StringVar()
+        self.lbl_FA = tkinter.Label(master, textvariable=self.var_FA)
+        self.lbl_FA.place(x=10, y=280)
+        self.lbl_FA.configure(font="Bold 11")
+        self.var_FA.set("False: " + str(FALSE_ALARMS))
+
+
         # LIT101 attack button
         self.btn_LIT101 = tkinter.Button(root, text="LIT101", command=self.attack_LIT101)
         self.btn_LIT101.place(x=150, y=30, anchor="center")
@@ -230,6 +248,7 @@ class GuiPart:
                 self.update_physical(volume_T101)
                 self.PLC_command()
                 self.check_attack(volume_T101)
+                self.output_results()
                 self.master.update_idletasks()
             except queue.Empty:
                 pass
@@ -277,7 +296,7 @@ class GuiPart:
     
     def check_attack(self, volume_T101):
         #attack detection via CUSUM
-        global CUSUM, BIAS, TAU, DETECTED
+        global CUSUM, BIAS, TAU, DETECTED, FALSE_ALARMS, isAttack
         f = open("cusum.txt","r")
         params = f.read().split()
 
@@ -303,10 +322,18 @@ class GuiPart:
             self.var_Det.set("D: " + str(DETECTED))
             self.var_Msg.set("!!!! CUSUM ALERT detected !!!! value = " + str(round(CUSUM, 4)))
 
+            #check if detection is false alarm
+            if (isAttack == False):
+                FALSE_ALARMS += 1
+                self.var_FA.set("False: " + str(FALSE_ALARMS))
+            
+            self.var_DetRate.set("D/A: " + str(round(DETECTED/ATTACKS, 4) if ATTACKS > 0 else 0))
+
 
     def take_reading(self, volume_T101):
-        global ATTACKS
+        global ATTACKS, isAttack
         if self.isAttacked_LIT101 == False:
+            isAttack = False
             return round(volume_T101, 4)
 
         # this is where the attack can take place
@@ -314,13 +341,22 @@ class GuiPart:
         f = open("attack.txt","r")
         deltas = f.read().split()
         delta = int(random.choice(deltas))
-        #isAttacked_LIT101 = False if delta == 0 else True
+        isAttack = True if delta != 0 else False
         if delta != 0:
             ATTACKS += 1
+            isAttack = True
             self.var_Atk.set("A: " + str(ATTACKS))
+        else:
+            isAttack = False
         return round(volume_T101 + delta, 4) 
 
+    def output_results(self):
+        global BIAS, TAU, ATTACKS, DETECTED, CUSUM, FALSE_ALARMS
+        f = open("outputs.txt","a")
+        f.write(f"{BIAS},{TAU},{ATTACKS},{DETECTED},{round(CUSUM,4)},{FALSE_ALARMS}\n")
 
+
+       
 
 class ThreadedClient:
     def __init__(self, master):
