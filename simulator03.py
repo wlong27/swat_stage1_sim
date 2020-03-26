@@ -26,9 +26,15 @@ FLOWRATE_3 = -27.40
 FLOWRATE_4 = 0
 flowRate_T101 = FLOWRATE_2
 
+
 BIAS = 2
 TAU = 5
 CUSUM = 0
+
+isBIAS_ATK = False
+isSURGE_ATK = False
+isGEO_ATK = False
+
 ATTACKS = 0
 DETECTED = 0
 FALSE_ALARMS = 0
@@ -40,6 +46,7 @@ FALSE_ALARMS = 0
 
 HVal = 771
 LVal = 530
+start_time = time.time()
 
 def startCommand():
     print('test')
@@ -296,25 +303,39 @@ class GuiPart:
     
     def check_attack(self, volume_T101):
         #attack detection via CUSUM
-        global CUSUM, BIAS, TAU, DETECTED, FALSE_ALARMS, isAttack
+        global CUSUM, BIAS, TAU, DETECTED, FALSE_ALARMS, isAttack, isBIAS_ATK, isGEO_ATK, isSURGE_ATK
         f = open("cusum.txt","r")
         params = f.read().split()
 
+        #check the current attack type
+        f = open("attacktype.txt","r")
+        attackType = f.read()
+        if (attackType == 'BIAS'):
+            isBIAS_ATK = True
+        elif(attackType == 'GEOMETRIC'): #not implemented
+            isGEO_ATK = True
+        elif(attackType == 'SURGE'):
+            isSURGE_ATK = True
+
         if (len(params) >= 2):
-            BIAS = int(params[0])
-            TAU = int(params[1])
+            BIAS = float(params[0])
+            TAU = float(params[1])
             self.var_Tau.set("t: " + str(TAU))
             self.var_Bias.set("b: " + str(BIAS))
-
+        
         T101_expected = volume_T101
         LIT101 = self.var_LIT101.get()
 
-        T101_z = abs(T101_expected - LIT101) - BIAS
+        #increase bias per timestep
+        if (isBIAS_ATK):
+            BIAS = round(BIAS * (time.time() -start_time), 4)
+            self.var_Bias.set("b: " + str(BIAS))
         
+        T101_z = abs(T101_expected - LIT101) - BIAS
         #S(k) = (S(k-1) + z(k))+
         CUSUM = CUSUM + T101_z
         if CUSUM < 0:
-	        CUSUM = 0
+            CUSUM = 0
         
         self.var_Msg.set("CUSUM value = " + str(round(CUSUM, 4)))
         if CUSUM > TAU:
@@ -332,9 +353,11 @@ class GuiPart:
 
     def take_reading(self, volume_T101):
         global ATTACKS, isAttack
+
+        noise = int(random.choice([0, 11, -11, 11]))
         if self.isAttacked_LIT101 == False:
             isAttack = False
-            return round(volume_T101, 4)
+            return round(volume_T101 + noise, 4)
 
         # this is where the attack can take place
         # it will look for the file "attack.txt" and perform the change value in the file 
@@ -348,7 +371,8 @@ class GuiPart:
             self.var_Atk.set("A: " + str(ATTACKS))
         else:
             isAttack = False
-        return round(volume_T101 + delta, 4) 
+
+        return round(volume_T101 + delta + noise, 4) 
 
     def output_results(self):
         global BIAS, TAU, ATTACKS, DETECTED, CUSUM, FALSE_ALARMS
@@ -372,6 +396,7 @@ class ThreadedClient:
 
         # Start the periodic call in the GUI to check if the queue contains
         self.periodicCall()
+        print(f"Time elapsed:{time}")
 
     def periodicCall(self):
         # Periodic call every 200ms to process incoming msg
@@ -382,11 +407,13 @@ class ThreadedClient:
         self.master.after(200, self.periodicCall)
 
     def workerThread1(self):
+        global start_time
         volume_T101 = 0 
         while self.running:
             volume_T101 += flowRate_T101
             if volume_T101 < 0:
                 volume_T101 = 0
+            print(str(time.time() - start_time))
             time.sleep(1)
             self.queue.put(volume_T101)
             
